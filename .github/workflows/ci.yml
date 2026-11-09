@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gen
+      - name: Generator
+        working-directory: gen
+        run: |
+          cargo fmt --check
+          cargo clippy --release -- -D warnings
+          cargo build --release
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - run: uv run ruff check && uv run ruff format --check .
+      - run: uv run pytest -q
+      - name: Train for a few steps on CPU
+        run: |
+          gen/target/release/sogno-gen --out /tmp/data --episodes 12 --frames 30 --width 32 --height 24
+          uv run sogno-train --data /tmp/data --out /tmp/run --steps 20 --batch 4 --width 8 --levels 2 \
+            --warmup 5 --log-every 10 --eval-every 20 --holdout 2
+          uv run sogno-dream --model /tmp/run --data /tmp/data --frames 10 --out /tmp/dream.gif
