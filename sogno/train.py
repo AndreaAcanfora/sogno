@@ -19,8 +19,20 @@ from mlx import nn
 from mlx.utils import tree_flatten
 
 from . import checkpoint
-from .data import Episodes
-from .model import Config, Dreamer, loss
+from .data import Batch, Episodes, apply_paint
+from .model import Config, Dreamer, loss, sample
+
+
+def dream_past(model: Dreamer, batch: Batch, passes: int, temperature: float) -> np.ndarray:
+    """Rolls `batch.past` forward through the frames the model must dream itself (the pushforward
+    trick): sampled exactly as at play time, painter strokes included, with no gradient through it."""
+    past = batch.past
+    for strokes in batch.paints:
+        nxt = np.array(sample(model, mx.array(past), passes, temperature))
+        for frame, (cells, elements) in zip(nxt, strokes):
+            apply_paint(frame, cells, elements, strict=False)
+        past = np.concatenate([past[:, 1:], nxt[:, None]], axis=1)
+    return past
 
 
 def evaluate(model: Dreamer, data: Episodes, episodes: range, batches: int, size: int, seed: int) -> dict:
@@ -54,6 +66,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--blocks", type=int, default=1, help="residual blocks per level")
     parser.add_argument("--history", type=int, default=2, help="past frames the model sees")
     parser.add_argument("--changed-weight", type=float, default=10.0)
+    parser.add_argument(
+        "--unroll",
+        type=int,
+        default=0,
+        help="up to this many frames the model dreams before each target (fights drift in long dreams)",
+    )
+    parser.add_argument("--unroll-passes", type=int, default=4)
+    parser.add_argument("--unroll-temperature", type=float, default=1.0)
     parser.add_argument("--holdout", type=int, default=10, help="episodes kept for evaluation")
     parser.add_argument("--eval-every", type=int, default=1000)
     parser.add_argument("--log-every", type=int, default=50)
@@ -109,8 +129,10 @@ def main(argv: list[str] | None = None) -> None:
     started = last = time.perf_counter()
     running = None
     for i in range(1, args.steps + 1):
-        batch = data.batch(rng, args.batch, model.config.history, train_episodes)
-        value = step(mx.array(batch.past), mx.array(batch.target))
+        unroll = int(rng.integers(0, args.unroll + 1)) if args.unroll else 0
+        batch = data.batch(rng, args.batch, model.config.history, train_episodes, unroll=unroll)
+        past = dream_past(model, batch, args.unroll_passes, args.unroll_temperature) if unroll else batch.past
+        value = step(mx.array(past), mx.array(batch.target))
         mx.eval(state)
         value = value.item()
         if not math.isfinite(value):

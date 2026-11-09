@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +29,9 @@ def apply_paint(state: np.ndarray, cells: np.ndarray, elements: np.ndarray, stri
 class Batch:
     past: np.ndarray  # u8 [B, history, H, W]: the world after the painter acted, oldest first
     target: np.ndarray  # u8 [B, H, W]: the world `stride` steps after the last frame of `past`
+    # With `unroll`: for each of the frames the model must dream before `target`, the painter's
+    # strokes for every sample, as (cells, elements). See `batch`.
+    paints: list = field(default_factory=list)
 
 
 class Episodes:
@@ -63,17 +66,30 @@ class Episodes:
         holdout = min(max(holdout, 1), self.episodes - 1)
         return range(self.episodes - holdout), range(self.episodes - holdout, self.episodes)
 
-    def batch(self, rng: np.random.Generator, size: int, history: int, episodes: range, flip: bool = True) -> Batch:
+    def batch(
+        self, rng: np.random.Generator, size: int, history: int, episodes: range, flip: bool = True, unroll: int = 0
+    ) -> Batch:
+        """Random training pairs. With `unroll` > 0, `past` ends `unroll` frames before the one `target`
+        follows: the trainer dreams those frames itself (applying `paints`), so the model learns to
+        predict the real next frame from its own, imperfect, past."""
         past = np.empty((size, history, self.height, self.width), np.uint8)
         target = np.empty((size, self.height, self.width), np.uint8)
+        paints: list = [[None] * size for _ in range(unroll)]
         for i in range(size):
             episode = int(rng.integers(episodes.start, episodes.stop))
-            frame = int(rng.integers(history - 1, self.frames))
+            frame = int(rng.integers(history - 1 + unroll, self.frames))
+            start = frame - unroll - history + 1
             for j in range(history):
-                past[i, j] = self.painted(episode, frame - history + 1 + j)
+                past[i, j] = self.painted(episode, start + j)
             target[i] = self.states[episode, frame + 1]
+            for s in range(unroll):
+                paints[s][i] = self.paints(episode, frame - unroll + 1 + s)
             # sabbia alternates its scan direction every step, so the physics is mirror-symmetric.
             if flip and rng.random() < 0.5:
                 past[i] = past[i, :, :, ::-1]
                 target[i] = target[i, :, ::-1]
-        return Batch(past, target)
+                for s in range(unroll):
+                    cells, elements = paints[s][i]
+                    y, x = np.divmod(cells, self.width)
+                    paints[s][i] = (y * self.width + (self.width - 1 - x), elements)
+        return Batch(past, target, paints)
