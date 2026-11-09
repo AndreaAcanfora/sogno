@@ -15,6 +15,7 @@ dependencies = [
 [project.scripts]
 sogno-train = "sogno.train:main"
 sogno-dream = "sogno.dream:main"
+sogno-export = "sogno.export:main"
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]

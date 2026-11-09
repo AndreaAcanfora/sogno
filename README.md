@@ -74,11 +74,28 @@ Useful knobs:
 `sogno-dream` takes `--passes` (model calls per frame) and `--temperature` (0 = always the most likely
 material).
 
+## In the browser
+
+The demo runs both worlds side by side: sabbia's real rules on the left (compiled to WebAssembly from
+the same revision the training data came from), the dream on the right. Each brush stroke goes into
+both. The dreamer runs on your GPU through WebGPU with no ML library: the U-Net is five small compute
+shaders in [`web/dreamer.js`](web/dreamer.js), and its logits match MLX's to 1e-5.
+
+```sh
+scripts/build-web.sh runs/sabbia     # the game as WebAssembly + this checkpoint's weights (2.4 MB, float16)
+python3 -m http.server -d web        # then open http://localhost:8000
+```
+
+`node web/test/check.mjs` (after `npm ci` in `web/` and `sogno-export ... --golden web/test/golden.bin`)
+checks the WebGPU engine against MLX on the same input and drives the demo in headless Chromium.
+
 ## Layout
 
-- `gen/`: the data generator, in Rust, using sabbia as a library.
+- `gen/`: the data generator, in Rust, using sabbia as a library (the scripted painter is in `lib.rs`).
 - `sogno/data.py`: reads the episodes; `model.py`: the dreamer, its loss and sampler;
-  `train.py` and `dream.py`: the two commands.
+  `train.py`, `dream.py` and `export.py`: the commands.
+- `web/`: the browser demo. `engine/` is the real game as WebAssembly, `dreamer.js` the network in
+  WebGPU, `model/` the trained weights.
 - `tests/`: fast checks that run on any CPU (`uv run pytest`).
 
 ## License

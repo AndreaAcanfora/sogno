@@ -1,0 +1,21 @@
+[package]
+name = "sogno-engine"
+version = "0.1.0"
+edition = "2024"
+description = "The real game for sogno's browser demo: sabbia plus the generator's starting scenes, as WebAssembly"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+sabbia = { git = "https://github.com/AndreaAcanfora/sabbia", rev = "5c97a48345f92688ca954b07ebc0d35f16876246" }
+sogno-gen = { path = "../../gen" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
