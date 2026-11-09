@@ -1,0 +1,27 @@
+[project]
+name = "sogno"
+version = "0.1.0"
+description = "A neural network that dreams a game, one frame at a time: trained on a Mac with MLX"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+    "mlx>=0.30; sys_platform == 'darwin'",
+    "mlx[cpu]>=0.30; sys_platform == 'linux'",
+    "numpy>=1.26",
+    "pillow>=10",
+]
+
+[project.scripts]
+sogno-train = "sogno.train:main"
+sogno-dream = "sogno.dream:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 120
