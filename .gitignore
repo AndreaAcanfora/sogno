@@ -1,0 +1,9 @@
+/gen/target/
+/data/
+/runs/
+*.gif
+!docs/*.gif
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
