@@ -1,0 +1,11 @@
+{
+  "name": "sogno-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node test/check.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.65.0"
+  }
+}

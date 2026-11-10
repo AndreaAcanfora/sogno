@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>sogno · engine check</title>
+<pre id="out">running…</pre>
+<script type="module">
+// Runs the WebGPU dreamer on the test case written by `sogno-export --golden` and compares its logits
+// with MLX's. Opened by check.mjs; the verdict lands in window.result.
+import { Dreamer } from "../dreamer.js";
+
+const params = new URLSearchParams(location.search);
+const model = params.get("model") ?? "../model/";
+const out = document.getElementById("out");
+try {
+  if (!navigator.gpu) throw new Error("no WebGPU in this browser");
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) throw new Error("no WebGPU adapter");
+  const device = await adapter.requestDevice();
+  const errors = [];
+  device.addEventListener("uncapturederror", (e) => errors.push(e.error.message));
+  const dreamer = await Dreamer.load(model, device);
+  const { history, classes } = dreamer.config;
+  const cells = dreamer.cells;
+  const bytes = new Uint8Array(await (await fetch(params.get("golden"))).arrayBuffer());
+  const frames = Array.from({ length: history + 1 }, (_, j) => bytes.slice(j * cells, (j + 1) * cells));
+  const expected = new Float32Array(bytes.slice((history + 1) * cells).buffer);
+  const got = await dreamer.logits(frames.slice(0, history), frames[history]);
+  let worst = 0, scale = 0, agree = 0;
+  for (let i = 0; i < got.length; i++) {
+    worst = Math.max(worst, Math.abs(got[i] - expected[i]));
+    scale = Math.max(scale, Math.abs(expected[i]));
+  }
+  for (let cell = 0; cell < cells; cell++) {
+    const argmax = (a) => { let b = 0; for (let k = 1; k < classes; k++) if (a[cell * classes + k] > a[cell * classes + b]) b = k; return b; };
+    agree += argmax(got) === argmax(expected);
+  }
+  let t0 = performance.now();
+  for (let i = 0; i < 10; i++) await dreamer.logits(frames.slice(0, history), frames[history]);
+  const callMs = (performance.now() - t0) / 10;
+  t0 = performance.now();
+  const runs = 5;
+  for (let i = 0; i < runs; i++) await dreamer.sample(frames.slice(0, history));
+  const frameMs = (performance.now() - t0) / runs;
+  window.result = { worst, scale, argmaxAgreement: agree / cells, callMs, frameMs, errors };
+} catch (error) {
+  window.result = { error: String(error.stack ?? error) };
+}
+out.textContent = JSON.stringify(window.result, null, 2);
+</script>

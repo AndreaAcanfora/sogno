@@ -136,3 +136,30 @@ def test_checkpoints_round_trip(tmp_path):
     past, partial = mx.zeros((1, 2, 4, 4), dtype=mx.uint8), mx.full((1, 4, 4), 4, dtype=mx.uint8)
     assert info["note"] == "test"
     assert mx.allclose(model(past, partial), loaded(past, partial)).item()
+
+
+def test_export_for_the_browser(tmp_path):
+    """The browser reads weights.bin through model.json's table: every tensor, float16, back to back."""
+    import json
+
+    from mlx.utils import tree_flatten
+
+    from sogno.export import export, golden
+
+    model = Dreamer(Config(width=8, levels=2))
+    export(model, {"data": {"height": 16, "width": 24, "stride": 2}}, tmp_path)
+    meta = json.loads((tmp_path / "model.json").read_text())
+    weights = np.frombuffer((tmp_path / "weights.bin").read_bytes(), np.float16)
+    assert meta["frame"] == [16, 24] and meta["config"]["width"] == 8
+    end = 0
+    for name, value in sorted(tree_flatten(model.parameters())):
+        entry = meta["tensors"][name]
+        assert entry["shape"] == list(value.shape) and entry["offset"] == end
+        stored = weights[end : end + value.size].reshape(value.shape)
+        assert np.allclose(stored, np.array(value), atol=1e-3)
+        end += value.size
+    assert end == weights.size
+
+    golden(model, tmp_path / "golden.bin", (16, 24))
+    cells, k, c = 16 * 24, model.config.history, model.config.classes
+    assert (tmp_path / "golden.bin").stat().st_size == (k + 1) * cells + cells * c * 4

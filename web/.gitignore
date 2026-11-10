@@ -1,0 +1,4 @@
+node_modules/
+/engine/target/
+/engine.wasm
+/test/golden.bin

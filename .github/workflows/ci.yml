@@ -19,13 +19,20 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: gen
+          workspaces: |
+            gen
+            web/engine
       - name: Generator
         working-directory: gen
         run: |
           cargo fmt --check
           cargo clippy --release -- -D warnings
           cargo build --release
+      - name: Browser engine (sabbia as WebAssembly)
+        run: |
+          rustup target add wasm32-unknown-unknown
+          (cd web/engine && cargo fmt --check && cargo clippy --release --target wasm32-unknown-unknown -- -D warnings)
+          scripts/build-web.sh
       - uses: astral-sh/setup-uv@v6
       - run: uv sync
       - run: uv run ruff check && uv run ruff format --check .
@@ -34,5 +41,14 @@ jobs:
         run: |
           gen/target/release/sogno-gen --out /tmp/data --episodes 12 --frames 30 --width 32 --height 24
           uv run sogno-train --data /tmp/data --out /tmp/run --steps 20 --batch 4 --width 8 --levels 2 \
-            --warmup 5 --log-every 10 --eval-every 20 --holdout 2
+            --warmup 5 --log-every 10 --eval-every 20 --holdout 2 --unroll 2
           uv run sogno-dream --model /tmp/run --data /tmp/data --frames 10 --out /tmp/dream.gif
+          uv run sogno-dream --model /tmp/run --data /tmp/data --frames 10 --score 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The dreamer in WebGPU matches MLX, and the demo runs
+        run: |
+          uv run sogno-export --model /tmp/run --out web/model --golden web/test/golden.bin
+          cd web && npm ci && npx playwright install --with-deps chromium
+          SOGNO_GPU_ARGS="--use-webgpu-adapter=swiftshader --enable-unsafe-swiftshader" npm run check

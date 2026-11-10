@@ -5,6 +5,10 @@
 Both worlds start from the same frames and get the same brush strokes. The real one runs sabbia's
 rules; the dream only ever sees its own previous frames. The GIF shows them side by side, and the
 table at the end compares how much of each material there is.
+
+With `--score N` it dreams the last N (held-out) episodes at once and prints how far the dream's mix
+of materials drifts from the real one over time: 0 is the same amount of every material, 1 is nothing
+in common. That is the number to watch, since cell-by-cell agreement is not expected.
 """
 
 from __future__ import annotations
@@ -38,6 +42,28 @@ def dream(
     return real, dreamt
 
 
+def drift(
+    model: Dreamer, data: Episodes, episodes: range, frames: int, passes: int, temperature: float
+) -> dict[int, float]:
+    """Mean material-mix drift between real and dreamed worlds, after 10, 30, 75 and 150 frames."""
+    k = model.config.history
+    eps = list(episodes)
+    dreamt = [np.stack([data.painted(e, t) for e in eps]) for t in range(k)]
+    out = {}
+    cells = data.height * data.width
+    for t in range(k - 1, min(k - 1 + frames, data.frames - 1)):
+        nxt = np.array(sample(model, mx.array(np.stack(dreamt[-k:], axis=1)), passes, temperature))
+        for frame, e in zip(nxt, eps):
+            apply_paint(frame, *data.paints(e, t + 1), strict=False)
+        dreamt = [*dreamt[1 - k :], nxt]
+        real = np.stack([data.painted(e, t + 1) for e in eps])
+        n = t + 2 - k
+        if n in (10, 30, 75, 150) or n == frames:
+            count = [np.stack([np.bincount(f.ravel(), minlength=data.classes) for f in w]) for w in (real, nxt)]
+            out[n] = float((np.abs(count[0] - count[1]).sum(1) / (2 * cells)).mean())
+    return out
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", required=True)
@@ -50,11 +76,18 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--out", default="dream.gif")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--score", type=int, default=0, help="score drift on this many held-out episodes")
     args = parser.parse_args(argv)
 
     mx.random.seed(args.seed)
     model, _ = checkpoint.load(args.model)
     data = Episodes(args.data)
+    if args.score:
+        episodes = range(max(data.episodes - args.score, 0), data.episodes)
+        scores = drift(model, data, episodes, args.frames, args.passes, args.temperature)
+        print(f"material drift over {len(episodes)} episodes, temperature {args.temperature}, {args.passes} passes")
+        print("  ".join(f"frame {n}: {v:.3f}" for n, v in scores.items()))
+        return
     episode = args.episode % data.episodes
     real, dreamt = dream(model, data, episode, args.frames, args.passes, args.temperature)
 

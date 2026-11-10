@@ -6,6 +6,9 @@ description = "Training data for sogno: sabbia episodes played by a scripted pai
 license = "MIT"
 publish = false
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "sogno-gen"
 path = "src/main.rs"
