@@ -85,8 +85,10 @@ def main(argv: list[str] | None = None) -> None:
     rng = np.random.default_rng(args.seed)
     data = Episodes(args.data)
     train_episodes, eval_episodes = data.split(args.holdout)
+    done = 0  # steps already in the weights, when resuming
     if args.resume:
-        model, _ = checkpoint.load(args.resume)
+        model, previous = checkpoint.load(args.resume)
+        done = int(previous.get("steps", 0))
         model.train()
     else:
         config = Config(
@@ -125,7 +127,7 @@ def main(argv: list[str] | None = None) -> None:
         optimizer.update(model, grads)
         return value
 
-    info = {"data": data.meta, "steps": 0}
+    info = {"data": data.meta, "steps": done, "unroll": args.unroll}
     started = last = time.perf_counter()
     running = None
     for i in range(1, args.steps + 1):
@@ -152,7 +154,7 @@ def main(argv: list[str] | None = None) -> None:
             model.eval()
             metrics = evaluate(model, data, eval_episodes, batches=8, size=args.batch, seed=args.seed + 1)
             model.train()
-            info.update(steps=i, loss=running, minutes=(time.perf_counter() - started) / 60, **metrics)
+            info.update(steps=done + i, loss=running, minutes=(time.perf_counter() - started) / 60, **metrics)
             checkpoint.save(model, args.out, info)
             print(
                 f"eval  step {i}  accuracy {metrics['accuracy']:.4f}  "
