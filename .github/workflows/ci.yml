@@ -26,7 +26,8 @@ jobs:
         working-directory: gen
         run: |
           cargo fmt --check
-          cargo clippy --release -- -D warnings
+          cargo clippy --release --all-targets -- -D warnings
+          cargo test --release
           cargo build --release
       - name: Browser engine (sabbia as WebAssembly)
         run: |

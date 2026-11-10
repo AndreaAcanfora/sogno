@@ -15,7 +15,7 @@ path = "src/main.rs"
 
 # The real game engine is the only dependency: the data comes from the exact rules the browser runs.
 [dependencies]
-sabbia = { git = "https://github.com/AndreaAcanfora/sabbia", rev = "5c97a48345f92688ca954b07ebc0d35f16876246" }
+sabbia = { git = "https://github.com/AndreaAcanfora/sabbia", rev = "6cef23fbbf47099122087dc93d66324c97d44e58" }
 
 [profile.release]
 opt-level = 3

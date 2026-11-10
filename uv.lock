@@ -620,7 +620,7 @@ wheels = [
 
 [[package]]
 name = "sogno"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "mlx", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },

@@ -44,6 +44,9 @@ def export(model: Dreamer, info: dict, out: Path) -> None:
         "dtype": "float16",
         "tensors": table,
         "trained": {k: info[k] for k in ("steps", "accuracy", "changed_accuracy") if k in info},
+        # Each class's sabbia element and range of remaining life, to draw and count them.
+        "elements": data.get("elements", list(range(model.config.classes))),
+        "lives": data.get("lives", [[0, 0]] * model.config.classes),
     }
     (out / "model.json").write_text(json.dumps(meta, indent=1) + "\n")
 

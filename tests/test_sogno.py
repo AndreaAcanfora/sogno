@@ -46,7 +46,10 @@ def data(tmp_path_factory) -> Episodes:
 
 def test_recorded_episodes_follow_the_format(data):
     assert data.states.shape == (6, 41, 24, 32)
-    assert data.states.max() < data.classes == 16
+    assert data.states.max() < data.classes == len(data.elements) == len(data.lives) == 93
+    # Classes past sabbia's 16 elements are older age bands of fire, smoke, steam and embers.
+    assert set(data.elements[16:]) == {4, 5, 6, 15}
+    assert data.elements[data.states].max() < 16
     assert len(data._keys) > 0, "the painter should have painted something"
     # Painting changes the input frame, and only where the painter drew.
     for e in range(data.episodes):

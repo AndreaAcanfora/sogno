@@ -210,9 +210,10 @@ export class Dreamer {
     this.none = this.buffer(16); // stands in for the residual when there is none
     this.ids = this.buffer((cfg.history + 1) * this.cells * 4, GPUBufferUsage.COPY_DST);
     const logits = this.build(h, w);
-    this.logitsBuffer = logits;
+    this.logitsBuffer = logits.buf;
+    this.stride = logits.c; // classes, rounded up to a multiple of 4
     this.readback = device.createBuffer({
-      size: this.cells * cfg.classes * 4,
+      size: this.cells * this.stride * 4,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
     });
   }
@@ -276,13 +277,25 @@ export class Dreamer {
       for (let b = 0; b < cfg.blocks; b++) x = this.resblock(`up.${u}.blocks.${b}`, x, channels[i]);
     }
     x = this.normSilu("norm", x);
-    return this.conv("head", x).buf;
+    return this.conv("head", x);
   }
 
   conv(name, x, { stride = 1, up = false, residual = null } = {}) {
-    const wt = this.tensor(`${name}.weight`);
-    const [cout, k, , cin] = wt.shape;
-    if (cin !== x.c || cout % 4 || cin % 4) throw new Error(`${name}: ${cin}->${cout} on ${x.c} channels`);
+    let wt = this.tensor(`${name}.weight`);
+    let bias = this.tensor(`${name}.bias`).data;
+    const [, k, , cin] = wt.shape;
+    if (cin !== x.c || cin % 4) throw new Error(`${name}: ${cin} inputs on ${x.c} channels`);
+    // The shader writes 4 outputs per thread: pad to a multiple of 4 with zero filters. Only the head
+    // needs it (sabbia has 93 classes); its extra logits are dropped in `logits`.
+    const cout = Math.ceil(wt.shape[0] / 4) * 4;
+    if (cout !== wt.shape[0]) {
+      const data = new Float32Array(cout * k * k * cin);
+      data.set(wt.data);
+      wt = { shape: [cout, k, k, cin], data };
+      const padded = new Float32Array(cout);
+      padded.set(bias);
+      bias = padded;
+    }
     const pad = (k - 1) >> 1;
     const ih = x.h, iw = x.w;
     const eh = up ? ih * 2 : ih, ew = up ? iw * 2 : iw;
@@ -291,7 +304,7 @@ export class Dreamer {
     const out = { buf: this.buffer(oh * ow * cout * 4), h: oh, w: ow, c: cout };
     this.step(
       "conv",
-      [x.buf, this.buffer(0, 0, packConv(wt.data, wt.shape)), this.buffer(0, 0, this.tensor(`${name}.bias`).data),
+      [x.buf, this.buffer(0, 0, packConv(wt.data, wt.shape)), this.buffer(0, 0, bias),
         residual ? residual.buf : this.none, out.buf],
       [ih, iw, cin, oh, ow, cout, k, stride, pad, up ? 1 : 0, residual ? 1 : 0, 0],
       (oh * ow * cout) / 4,
@@ -347,8 +360,12 @@ export class Dreamer {
     encoder.copyBufferToBuffer(this.logitsBuffer, 0, this.readback, 0, this.readback.size);
     this.device.queue.submit([encoder.finish()]);
     await this.readback.mapAsync(GPUMapMode.READ);
-    const out = new Float32Array(this.readback.getMappedRange().slice(0));
+    const raw = new Float32Array(this.readback.getMappedRange().slice(0));
     this.readback.unmap();
+    const c = this.config.classes;
+    if (this.stride === c) return raw;
+    const out = new Float32Array(this.cells * c);
+    for (let cell = 0; cell < this.cells; cell++) out.set(raw.subarray(cell * this.stride, cell * this.stride + c), cell * c);
     return out;
   }
 
