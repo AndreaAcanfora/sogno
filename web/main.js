@@ -19,11 +19,28 @@ const MATERIALS = [
   { id: 0, name: "Eraser", color: "#10121a" },
 ];
 // sabbia's element colours, by id (sogno/palette.py).
-const PALETTE = [
+const ELEMENT_COLORS = [
   0x10121a, 0x6b6f7a, 0xe2bf6e, 0x2f7de1, 0xff8a1c, 0x555860, 0xb8c4d6, 0x7a4e2a,
   0x4a3a2a, 0xf04a14, 0x7ce83a, 0xa8e4f5, 0x2fa34a, 0xc9e8ef, 0x8a8680, 0xc83a10,
 ];
-const EMPTY = 0, WALL = 1;
+const EMPTY = 0, WALL = 1, FIRE = 4, EMBER = 15;
+
+// A colour per class: its element's, with flames and embers shaded by how long they have left, the
+// way sabbia draws them (sogno/palette.py, class_palette).
+function classColors(elements, lives) {
+  return elements.map((element, i) => {
+    const life = Math.floor((lives[i][0] + lives[i][1]) / 2);
+    if (element === FIRE) {
+      const heat = Math.min(life, 40);
+      return (255 << 16) | ((60 + heat * 4 + 15) << 8) | heat;
+    }
+    if (element === EMBER) {
+      const glow = Math.floor(Math.min(life, 140) / 2);
+      return ((150 + Math.min(glow, 105)) << 16) | ((30 + Math.floor(glow / 2) + 12) << 8) | 10;
+    }
+    return ELEMENT_COLORS[element];
+  });
+}
 
 const $ = (id) => document.getElementById(id);
 const canvases = [$("real"), $("dream")];
@@ -32,7 +49,7 @@ const stats = $("stats");
 let material = MATERIALS[0];
 let brush = 3;
 let paused = false;
-let temperature = 0.5;
+let temperature = 0;
 
 function fail(text) {
   const message = $("message");
@@ -70,21 +87,25 @@ const [H, W] = dreamer.frame;
 const CELLS = H * W;
 const STRIDE = dreamer.meta.stride ?? 2;
 const HISTORY = dreamer.config.history;
+const PALETTE = classColors(
+  dreamer.meta.elements ?? ELEMENT_COLORS.map((_, i) => i),
+  dreamer.meta.lives ?? ELEMENT_COLORS.map(() => [0, 0]),
+);
 for (const canvas of canvases) Object.assign(canvas, { width: W, height: H });
 $("dream-note").textContent = `· ${(dreamer.meta.trained?.steps ?? 0).toLocaleString("en")} training steps`;
 
 // ---------- the two worlds ----------
 
-const elements = () => new Uint8Array(engine.memory.buffer, engine.engine_elements(), CELLS).slice();
+const classes = () => new Uint8Array(engine.memory.buffer, engine.engine_classes(), CELLS).slice();
 let real = null; // Uint8Array: the real world now
 let dream = []; // the dreamer's last HISTORY frames, oldest first
 
 function newScene(seed = (Math.random() * 2 ** 32) >>> 0) {
   engine.engine_init(W, H, seed);
-  const frames = [elements()];
+  const frames = [classes()];
   while (frames.length < HISTORY) {
     engine.engine_step(STRIDE);
-    frames.push(elements());
+    frames.push(classes());
   }
   real = frames.at(-1);
   dream = frames.map((f) => f.slice());
@@ -100,7 +121,7 @@ function wake() {
 function paint(x, y) {
   const before = real;
   engine.engine_paint(x, y, brush, material.id);
-  const after = elements();
+  const after = classes();
   const now = dream.at(-1);
   for (let i = 0; i < CELLS; i++) {
     if (after[i] === before[i]) continue;
@@ -147,7 +168,7 @@ async function tick() {
     paintStroke();
     const past = dream.map((f) => f.slice());
     engine.engine_step(STRIDE);
-    real = elements();
+    real = classes();
     const t0 = performance.now();
     const next = await dreamer.sample(past, { temperature });
     dreamMs = dreamMs ? dreamMs * 0.9 + (performance.now() - t0) * 0.1 : performance.now() - t0;

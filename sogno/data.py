@@ -41,6 +41,10 @@ class Episodes:
         self.states = np.load(path / "states.npy", mmap_mode="r")
         paints = np.load(path / "paints.npy")
         self.classes = int(self.meta["classes"])
+        # Each class's sabbia element, and the range of remaining life it stands for (fire, smoke,
+        # steam and embers come in age bands; see gen/src/lib.rs). Older data has elements only.
+        self.elements = np.array(self.meta.get("elements", range(self.classes)), np.uint8)
+        self.lives = self.meta.get("lives", [[0, 0]] * self.classes)
         self.episodes, frames_plus_one, self.height, self.width = self.states.shape
         self.frames = frames_plus_one - 1
         keys = paints[:, 0].astype(np.int64) * self.frames + paints[:, 1]
@@ -50,7 +54,7 @@ class Episodes:
         self._elements = paints[order, 3].astype(np.uint8)
 
     def paints(self, episode: int, frame: int) -> tuple[np.ndarray, np.ndarray]:
-        """The cells the painter changed at `frame`, and what it painted there."""
+        """The cells the painter changed at `frame`, and the classes it painted there."""
         key = episode * self.frames + frame
         lo, hi = np.searchsorted(self._keys, [key, key + 1])
         return self._cells[lo:hi], self._elements[lo:hi]

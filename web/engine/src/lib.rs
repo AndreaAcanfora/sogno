@@ -1,7 +1,7 @@
 //! The real game for the browser demo, as a handful of C-style exports (no bindings generator).
 //!
 //! It is sabbia itself, at the same revision the training data came from, plus the generator's
-//! random starting scenes. The page reads the element grid straight out of WebAssembly memory: the
+//! random starting scenes. The page reads the class grid straight out of WebAssembly memory: the
 //! same ids the dreamer sees and predicts. The exports are prefixed because sabbia, built for
 //! WebAssembly, already exports its own `init`, `step`, `paint` and `clear`.
 
@@ -11,7 +11,7 @@ use std::cell::RefCell;
 
 thread_local! {
     static WORLD: RefCell<World> = RefCell::new(World::new(1, 1, 1));
-    static ELEMENTS: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static CLASSES: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
 fn with_world<T>(f: impl FnOnce(&mut World) -> T) -> T {
@@ -55,15 +55,13 @@ pub extern "C" fn engine_clear() {
     with_world(World::clear);
 }
 
-/// Pointer to `width * height` element ids, row by row. Valid until the next call into the module.
+/// Pointer to `width * height` class ids, row by row: the element ids, with fire, smoke, steam and
+/// embers split by age (`sogno_gen::classes`). Valid until the next call into the module.
 #[unsafe(no_mangle)]
-pub extern "C" fn engine_elements() -> *const u8 {
-    let ids: Vec<u8> = with_world(|world| {
-        let (w, h) = (world.width(), world.height());
-        (0..w * h).map(|i| world.get(i % w, i / w) as u8).collect()
-    });
-    ELEMENTS.with(|buffer| {
-        *buffer.borrow_mut() = ids;
-        buffer.borrow().as_ptr()
+pub extern "C" fn engine_classes() -> *const u8 {
+    CLASSES.with(|buffer| {
+        let mut buffer = buffer.borrow_mut();
+        with_world(|world| sogno_gen::class_grid(world, &mut buffer));
+        buffer.as_ptr()
     })
 }

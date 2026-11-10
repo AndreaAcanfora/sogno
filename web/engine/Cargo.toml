@@ -10,7 +10,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-sabbia = { git = "https://github.com/AndreaAcanfora/sabbia", rev = "5c97a48345f92688ca954b07ebc0d35f16876246" }
+sabbia = { git = "https://github.com/AndreaAcanfora/sabbia", rev = "6cef23fbbf47099122087dc93d66324c97d44e58" }
 sogno-gen = { path = "../../gen" }
 
 [profile.release]

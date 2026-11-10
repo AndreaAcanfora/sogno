@@ -7,7 +7,7 @@ rules; the dream only ever sees its own previous frames. The GIF shows them side
 table at the end compares how much of each material there is.
 
 With `--score N` it dreams the last N (held-out) episodes at once and prints how far the dream's mix
-of materials drifts from the real one over time: 0 is the same amount of every material, 1 is nothing
+of materials (whatever their age) drifts from the real one over time: 0 is the same amount of every material, 1 is nothing
 in common. That is the number to watch, since cell-by-cell agreement is not expected.
 """
 
@@ -22,7 +22,7 @@ from PIL import Image
 from . import checkpoint
 from .data import Episodes, apply_paint
 from .model import Dreamer, sample
-from .palette import NAMES, rgb
+from .palette import NAMES, class_palette, rgb
 
 
 def dream(
@@ -42,6 +42,11 @@ def dream(
     return real, dreamt
 
 
+def materials(data: Episodes, frame: np.ndarray) -> np.ndarray:
+    """How many cells of each sabbia element `frame` holds, whatever their age."""
+    return np.bincount(data.elements[frame].ravel(), minlength=len(NAMES))
+
+
 def drift(
     model: Dreamer, data: Episodes, episodes: range, frames: int, passes: int, temperature: float
 ) -> dict[int, float]:
@@ -59,7 +64,7 @@ def drift(
         real = np.stack([data.painted(e, t + 1) for e in eps])
         n = t + 2 - k
         if n in (10, 30, 75, 150) or n == frames:
-            count = [np.stack([np.bincount(f.ravel(), minlength=data.classes) for f in w]) for w in (real, nxt)]
+            count = [np.stack([materials(data, f) for f in w]) for w in (real, nxt)]
             out[n] = float((np.abs(count[0] - count[1]).sum(1) / (2 * cells)).mean())
     return out
 
@@ -92,9 +97,10 @@ def main(argv: list[str] | None = None) -> None:
     real, dreamt = dream(model, data, episode, args.frames, args.passes, args.temperature)
 
     gap = np.full((data.height, 2, 3), 255, np.uint8)
+    palette = class_palette(data.elements, data.lives)
     images = []
     for a, b in zip(real, dreamt):
-        frame = np.concatenate([rgb(a), gap, rgb(b)], axis=1)
+        frame = np.concatenate([rgb(a, palette), gap, rgb(b, palette)], axis=1)
         frame = frame.repeat(args.scale, axis=0).repeat(args.scale, axis=1)
         images.append(Image.fromarray(frame))
     images[0].save(args.out, save_all=True, append_images=images[1:], duration=1000 // args.fps, loop=0)
@@ -103,8 +109,8 @@ def main(argv: list[str] | None = None) -> None:
     agree = np.mean([np.mean(a == b) for a, b in zip(real, dreamt)])
     print(f"cells that match the real game: {agree:.1%} (they drift apart: both worlds are random)")
     print(f"{'material':10s} {'real':>7s} {'dream':>7s}")
-    last_real, last_dream = np.bincount(real[-1].ravel(), minlength=16), np.bincount(dreamt[-1].ravel(), minlength=16)
-    for i, name in enumerate(NAMES[: model.config.classes]):
+    last_real, last_dream = materials(data, real[-1]), materials(data, dreamt[-1])
+    for i, name in enumerate(NAMES):
         if i and (last_real[i] or last_dream[i]):
             print(f"{name:10s} {last_real[i]:7d} {last_dream[i]:7d}")
 

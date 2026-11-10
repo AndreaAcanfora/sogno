@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "sabbia"
 version = "0.1.0"
-source = "git+https://github.com/AndreaAcanfora/sabbia?rev=5c97a48345f92688ca954b07ebc0d35f16876246#5c97a48345f92688ca954b07ebc0d35f16876246"
+source = "git+https://github.com/AndreaAcanfora/sabbia?rev=6cef23fbbf47099122087dc93d66324c97d44e58#6cef23fbbf47099122087dc93d66324c97d44e58"
 
 [[package]]
 name = "sogno-engine"
