@@ -1,6 +1,6 @@
 [project]
 name = "sogno"
-version = "0.1.0"
+version = "0.2.0"
 description = "A neural network that dreams a game, one frame at a time: trained on a Mac with MLX"
 readme = "README.md"
 license = "MIT"
