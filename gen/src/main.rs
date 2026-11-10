@@ -3,18 +3,19 @@
 //! Each episode is a random scene that a painter keeps drawing into, one stroke at a time, the way a
 //! person plays: pour sand from the top, draw a wall, set the wood on fire. The output is three files:
 //!
-//! - `states.npy`, `u8 [episodes, frames + 1, height, width]`: element ids. `states[e, 0]` is the
+//! - `states.npy`, `u8 [episodes, frames + 1, height, width]`: class ids: sabbia's element ids, with
+//!   fire, smoke, steam and embers split by how long they have left to burn (see `classes` in lib.rs). `states[e, 0]` is the
 //!   starting scene; `states[e, t + 1]` is the world `stride` steps after the painter acted at frame t.
-//! - `paints.npy`, `i32 [n, 4]`: the cells the painter changed, as `(episode, frame, cell, element)`
+//! - `paints.npy`, `i32 [n, 4]`: the cells the painter changed, as `(episode, frame, cell, class)`
 //!   rows sorted by episode and frame. The model's input at frame t is `states[e, t]` with these applied.
-//! - `meta.json`: sizes, stride and seed.
+//! - `meta.json`: sizes, stride, seed, and for every class its element and range of remaining life.
 //!
 //! So every frame gives one training pair, painted or not: what the world looked like after the
 //! painter acted, and what it looked like `stride` steps later.
 
 use sabbia::world::Rng;
 use sabbia::{Element, World};
-use sogno_gen::{Stroke, between, scene};
+use sogno_gen::{Stroke, between, class_grid, classes, scene};
 use std::fs;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -113,20 +114,18 @@ fn run(options: &Options) -> io::Result<()> {
     let mut states = vec![0u8; episodes * (frames + 1) * cells];
     let mut paints: Vec<[i32; 4]> = Vec::new();
     let mut rng = Rng::new(seed.wrapping_mul(2_654_435_761).wrapping_add(1));
-    let mut before = vec![Element::Empty; cells];
+    let (mut before, mut after) = (Vec::new(), Vec::new());
 
     for episode in 0..episodes {
         let mut world = World::new(width, height, rng.next_u32());
         scene(&mut world, &mut rng);
         let mut stroke: Option<Stroke> = None;
         let base = episode * (frames + 1) * cells;
+        let mut grid = Vec::new();
         let mut record = |world: &World, frame: usize| {
             let at = base + frame * cells;
-            for y in 0..height {
-                for x in 0..width {
-                    states[at + y * width + x] = world.get(x, y) as u8;
-                }
-            }
+            class_grid(world, &mut grid);
+            states[at..at + cells].copy_from_slice(&grid);
         };
         record(&world, 0);
         for frame in 0..frames {
@@ -134,12 +133,10 @@ fn run(options: &Options) -> io::Result<()> {
                 stroke = Some(Stroke::new(&mut rng, width as i32, height as i32));
             }
             if let Some(s) = &mut stroke {
-                for (i, cell) in before.iter_mut().enumerate() {
-                    *cell = world.get(i % width, i / width);
-                }
+                class_grid(&world, &mut before);
                 world.paint(s.x.round() as i32, s.y.round() as i32, s.radius, s.element);
-                for (i, &old) in before.iter().enumerate() {
-                    let new = world.get(i % width, i / width);
+                class_grid(&world, &mut after);
+                for (i, (&old, &new)) in before.iter().zip(&after).enumerate() {
                     if new != old {
                         paints.push([episode as i32, frame as i32, i as i32, new as i32]);
                     }
@@ -180,11 +177,18 @@ fn run(options: &Options) -> io::Result<()> {
         &[paints.len(), 4],
         &flat,
     )?;
+    let table = classes();
+    let list = |f: &dyn Fn(&(Element, u8, u8)) -> String| {
+        table.iter().map(f).collect::<Vec<_>>().join(", ")
+    };
     let meta = format!(
         "{{\n  \"game\": \"sabbia\",\n  \"classes\": {},\n  \"episodes\": {episodes},\n  \"frames\": {frames},\n  \
-\"width\": {width},\n  \"height\": {height},\n  \"stride\": {stride},\n  \"seed\": {seed},\n  \"paints\": {}\n}}\n",
-        Element::ALL.len(),
-        paints.len()
+\"width\": {width},\n  \"height\": {height},\n  \"stride\": {stride},\n  \"seed\": {seed},\n  \"paints\": {},\n  \
+\"elements\": [{}],\n  \"lives\": [{}]\n}}\n",
+        table.len(),
+        paints.len(),
+        list(&|c| (c.0 as u8).to_string()),
+        list(&|c| format!("[{}, {}]", c.1, c.2)),
     );
     fs::write(options.out.join("meta.json"), meta)
 }
