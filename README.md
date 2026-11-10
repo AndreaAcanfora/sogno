@@ -11,7 +11,11 @@ up, water levels out, fire spreads along wood, acid eats walls. Its frames are g
 The next one is the Game Boy, through the [mattone](https://github.com/AndreaAcanfora/mattone)
 emulator (160×144 cells, 4 shades).
 
-> Status: v0.1, the training pipeline. A trained model and the browser demo come next.
+> Status: v0.2. A trained model (in `web/model/`) and a browser demo where you draw into the real
+> game and the dream side by side. The dream holds its shape for a few seconds, then fire runs away:
+> see [What it gets wrong](#what-it-gets-wrong).
+
+![Real game on the left, dream on the right: 150 frames of a held-out episode](docs/dream.gif)
 
 ## How it works
 
@@ -45,9 +49,13 @@ cargo run --release --manifest-path gen/Cargo.toml -- --out data/sabbia --episod
 
 # 2. Train. MLX uses the Mac's GPU on its own; progress and an ETA are printed as it goes.
 uv run sogno-train --data data/sabbia --out runs/sabbia
+#    Then teach it to recover from its own mistakes (see below), from where it stopped.
+uv run sogno-train --data data/sabbia --out runs/unroll --resume runs/sabbia \
+  --steps 6000 --unroll 3 --lr 1e-4 --warmup 200
 
 # 3. Watch it dream an episode it never saw, next to the real game.
-uv run sogno-dream --model runs/sabbia --data data/sabbia --out dream.gif
+uv run sogno-dream --model runs/unroll --data data/sabbia --temperature 0.5 --out dream.gif
+uv run sogno-dream --model runs/unroll --data data/sabbia --temperature 0.5 --score 16   # drift, below
 ```
 
 On an 8 GB M1, start with a short run to measure speed, then size the real one from the ETA:
@@ -70,9 +78,49 @@ Useful knobs:
 | `--blocks` | 1 | residual blocks per level (2 makes the model 1.7M) |
 | `--history` | 2 | past frames the model sees: fire's remaining life is only visible over time |
 | `--changed-weight` | 10 | extra weight on cells that change: most of a frame sits still |
+| `--unroll` | 0 | frames the model dreams itself before each target (about 3x slower per step) |
 
 `sogno-dream` takes `--passes` (model calls per frame) and `--temperature` (0 = always the most likely
 material).
+
+## Results
+
+On an M1 Pro (16 GB), the 20,000 base steps take 40 minutes at 8.5 steps/s and the 6,000 unrolled ones
+33 minutes at 3 steps/s. Predicting one frame from real frames is easy: 98% of cells right, 90-93% of
+the cells that move. Dreaming is the hard part, because from the second frame on the network only sees
+its own output, and its small mistakes become its next input.
+
+`sogno-dream --score 16` measures that on 16 held-out episodes: how far the dream's mix of materials
+has drifted from the real game's (0 = the same amount of every material, 1 = nothing in common).
+
+| model | temperature | after 10 frames | 30 | 75 | 150 |
+|---|---|---|---|---|---|
+| base, 20k steps | 0.5 | 0.056 | 0.148 | 0.394 | 0.614 |
+| base, 20k steps | 0 | 0.058 | 0.125 | 0.157 | 0.234 |
+| + 6k unrolled steps | 0.5 | **0.032** | **0.072** | **0.119** | **0.167** |
+| + 6k unrolled steps | 0 | 0.034 | 0.067 | 0.084 | 0.114 |
+
+**Unrolling** (`--unroll N`, the pushforward trick from neural PDE solvers) is what helps most. Before
+each training step, the model dreams up to N frames from a real starting point, with the painter's
+strokes applied, and is then asked for the *real* next frame. It learns to steer back towards the game
+instead of building on its own errors. Unrolling further (6 frames, 5k more steps) did not help.
+
+Temperature 0 drifts least, but it freezes the world: a material that changes only with low
+probability per frame never changes. The demo defaults to 0.5.
+
+### What it gets wrong
+
+Fire, smoke and steam in sabbia die on a hidden countdown (fire lives 20-40 physics steps, smoke
+40-90). The frame shows the element, not its age, so with two frames of history the network cannot
+tell a fresh flame from a dying one. It guesses an average chance of dying, and at a temperature
+below 1 that small chance gets smaller still. So flames outlive the real ones, spread, and turn stone
+into lava. In one run of 150 frames at temperature 0.5, the 16 held-out dreams held 2,964 fire cells against
+106 in the game, and 5,698 smoke against 280, while walls, sand, wood and glass stay within about a
+third of the real amounts.
+
+The fix is to show the age. sabbia's own renderer already shades fire by heat and embers by glow, so
+splitting those materials into a few age bands puts on the frame what a player sees. Smoke and steam
+would need sabbia to expose their life.
 
 ## In the browser
 
@@ -82,7 +130,7 @@ both. The dreamer runs on your GPU through WebGPU with no ML library: the U-Net 
 shaders in [`web/dreamer.js`](web/dreamer.js), and its logits match MLX's to 1e-5.
 
 ```sh
-scripts/build-web.sh runs/sabbia     # the game as WebAssembly + this checkpoint's weights (2.4 MB, float16)
+scripts/build-web.sh runs/unroll     # the game as WebAssembly + this checkpoint's weights (2.4 MB, float16)
 python3 -m http.server -d web        # then open http://localhost:8000
 ```
 
