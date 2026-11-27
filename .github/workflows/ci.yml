@@ -34,7 +34,7 @@ jobs:
           rustup target add wasm32-unknown-unknown
           (cd web/engine && cargo fmt --check && cargo clippy --release --target wasm32-unknown-unknown -- -D warnings)
           scripts/build-web.sh
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
       - run: uv sync
       - run: uv run ruff check && uv run ruff format --check .
       - run: uv run pytest -q
